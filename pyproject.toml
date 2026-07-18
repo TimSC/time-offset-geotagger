@@ -3,6 +3,7 @@ name = "time-offset-geotagger"
 version = "0.1.0"
 description = "Tag camera photos with interpolated GPS positions from a GPX track and a time offset."
 readme = "README.md"
+license = "BSD-3-Clause"
 requires-python = ">=3.10"
 dependencies = [
     "Pillow>=10.0",
