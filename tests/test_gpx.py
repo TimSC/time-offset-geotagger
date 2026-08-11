@@ -27,3 +27,25 @@ def test_interpolate_returns_none_outside_track():
     points = [TrackPoint(datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc), 51.0, -1.0)]
 
     assert interpolate(points, datetime(2026, 7, 18, 9, 59, tzinfo=timezone.utc)) is None
+
+
+def test_interpolate_returns_none_when_gap_exceeds_threshold():
+    points = [
+        TrackPoint(datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc), 51.0, -1.0),
+        TrackPoint(datetime(2026, 7, 18, 10, 10, tzinfo=timezone.utc), 52.0, 1.0),
+    ]
+
+    result = interpolate(points, datetime(2026, 7, 18, 10, 5, tzinfo=timezone.utc), max_gap_seconds=300)
+
+    assert result is None
+
+
+def test_interpolate_allows_exact_track_point_with_sparse_neighbors():
+    points = [
+        TrackPoint(datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc), 51.0, -1.0),
+        TrackPoint(datetime(2026, 7, 18, 10, 10, tzinfo=timezone.utc), 52.0, 1.0),
+    ]
+
+    result = interpolate(points, datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc), max_gap_seconds=1)
+
+    assert result == points[0]

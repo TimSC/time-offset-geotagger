@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .exif import Photo, discover_photos, load_photo, read_taken_at, write_gps_tags
+from .exif import Photo, clear_gps_tags, discover_photos, load_photo, read_taken_at, write_gps_tags
 from .gpx import TrackPoint, interpolate, parse_gpx
 from .timeutil import format_offset, parse_actual_date_time
 
@@ -147,6 +147,10 @@ class MainWindow(QMainWindow):
         self.offset_seconds.setRange(-7 * 24 * 3600, 7 * 24 * 3600)
         self.offset_seconds.setSuffix(" s")
         self.offset_label = QLabel("+00:00:00")
+        self.max_gpx_gap_seconds = QSpinBox()
+        self.max_gpx_gap_seconds.setRange(1, 24 * 3600)
+        self.max_gpx_gap_seconds.setValue(300)
+        self.max_gpx_gap_seconds.setSuffix(" s")
         self.status_label = QLabel("Choose GPX files and a photo folder to begin.")
 
         self.table = QTableWidget(0, 7)
@@ -161,6 +165,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self.offset_seconds.valueChanged.connect(self._offset_changed)
+        self.max_gpx_gap_seconds.valueChanged.connect(self._clear_matches)
         self._offset_changed()
 
     def _build_ui(self) -> None:
@@ -203,10 +208,13 @@ class MainWindow(QMainWindow):
         calibration_layout.addWidget(QLabel("Manual offset"), 3, 0)
         calibration_layout.addWidget(self.offset_seconds, 3, 1)
         calibration_layout.addWidget(self.offset_label, 3, 2)
+        calibration_layout.addWidget(QLabel("Max GPX gap"), 4, 0)
+        calibration_layout.addWidget(self.max_gpx_gap_seconds, 4, 1)
 
         actions = QHBoxLayout()
         actions.addWidget(self._button("Preview Matches", self.preview_matches))
         actions.addWidget(self._button("Write GPS Tags", self.write_tags))
+        actions.addWidget(self._button("Clear GPS Tags", self.clear_tags))
         actions.addStretch()
 
         root.addWidget(inputs)
@@ -329,8 +337,8 @@ class MainWindow(QMainWindow):
             if photo is None:
                 continue
             adjusted = photo.taken_at.replace(tzinfo=timezone.utc) + timedelta(seconds=self.offset_seconds.value())
-            point = interpolate(self.gpx_points, adjusted)
-            status = "Ready" if point else "Outside GPX time range"
+            point = interpolate(self.gpx_points, adjusted, max_gap_seconds=self.max_gpx_gap_seconds.value())
+            status = "Ready" if point else "Outside GPX time range or GPX gap too large"
             self.matches.append(Match(photo=photo, adjusted_time_utc=adjusted, point=point, status=status))
 
         self._populate_table()
@@ -365,12 +373,47 @@ class MainWindow(QMainWindow):
         tagged = len(ready) - len(failures)
         self.status_label.setText(f"Wrote GPS tags to {tagged} photos.")
 
+    def clear_tags(self) -> None:
+        if not self.photo_folder.text():
+            self._error("Photo folder missing", "Choose a folder containing JPEG photos.")
+            return
+
+        photos = discover_photos(Path(self.photo_folder.text()))
+        if not photos:
+            self._error("No photos found", "The selected folder does not contain JPEG photos.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Clear GPS tags",
+            f"Clear GPS tags from {len(photos)} photos in the selected folder?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        failures: list[str] = []
+        for path in photos:
+            try:
+                clear_gps_tags(path)
+            except Exception as exc:
+                failures.append(f"{path.name}: {exc}")
+
+        if failures:
+            self._error("Some photos could not be cleared", "\n".join(failures[:10]))
+        cleared = len(photos) - len(failures)
+        self.status_label.setText(f"Cleared GPS tags from {cleared} photos.")
+
     def _offset_changed(self) -> None:
         self.offset_label.setText(format_offset(self.offset_seconds.value()))
 
-    def _refresh_gpx_list(self) -> None:
+    def _clear_matches(self) -> None:
         self.matches = []
         self.table.setRowCount(0)
+
+    def _refresh_gpx_list(self) -> None:
+        self._clear_matches()
 
         self.gpx_points = [
             point

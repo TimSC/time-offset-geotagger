@@ -63,7 +63,7 @@ def parse_gpx_time(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def interpolate(points: Iterable[TrackPoint], when: datetime) -> TrackPoint | None:
+def interpolate(points: Iterable[TrackPoint], when: datetime, max_gap_seconds: float | None = None) -> TrackPoint | None:
     ordered = sorted(points, key=lambda point: point.time)
     if when.tzinfo is None:
         raise ValueError("Interpolation time must include timezone information")
@@ -79,6 +79,8 @@ def interpolate(points: Iterable[TrackPoint], when: datetime) -> TrackPoint | No
             before = ordered[index - 1]
             after = point
             total = (after.time - before.time).total_seconds()
+            if max_gap_seconds is not None and total > max_gap_seconds:
+                return None
             ratio = 0.0 if total == 0 else (when - before.time).total_seconds() / total
             ele = None
             if before.ele is not None and after.ele is not None:

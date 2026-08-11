@@ -80,6 +80,12 @@ def write_gps_tags(path: Path, point: TrackPoint) -> None:
     piexif.insert(piexif.dump(exif_dict), str(path))
 
 
+def clear_gps_tags(path: Path) -> None:
+    exif_dict = piexif.load(str(path))
+    exif_dict["GPS"] = {}
+    piexif.insert(piexif.dump(exif_dict), str(path))
+
+
 def _coordinate_to_exif(value: float, positive_ref: str, negative_ref: str) -> tuple[str, tuple]:
     ref = positive_ref if value >= 0 else negative_ref
     absolute = abs(value)
