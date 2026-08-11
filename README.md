@@ -1,10 +1,10 @@
 # time-offset-geotagger
 
-A small Qt/Python app for geotagging camera photos from a phone GPX track when the camera clock is wrong.
+A small Qt/Python app for geotagging camera photos from phone GPX tracks when the camera clock is wrong.
 
 ## Workflow
 
-1. Choose a GPX track recorded by the phone.
+1. Add one or more GPX tracks recorded by the phone.
 2. Choose the photo folder.
 3. Pick a calibration photo that shows the trusted phone time, or enter a manual offset.
 4. Enter the actual phone date, time, and timezone visible in that calibration photo.
@@ -41,7 +41,7 @@ Camera EXIF times are normally stored without a timezone. The calibration step c
 offset = actual_phone_time - camera_exif_time_on_calibration_photo
 ```
 
-Then each photo is matched against the GPX track with:
+Then each photo is matched against the loaded GPX tracks with:
 
 ```text
 track_time = photo_exif_time + offset

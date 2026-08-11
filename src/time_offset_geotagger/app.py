@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -121,10 +123,13 @@ class MainWindow(QMainWindow):
         self.resize(980, 680)
 
         self.gpx_points: list[TrackPoint] = []
+        self.gpx_files: dict[Path, list[TrackPoint]] = {}
         self.matches: list[Match] = []
 
-        self.gpx_path = QLineEdit()
-        self.gpx_path.setReadOnly(True)
+        self.gpx_list = QListWidget()
+        self.gpx_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.gpx_list.setAlternatingRowColors(True)
+        self.gpx_list.setMinimumHeight(88)
         self.photo_folder = QLineEdit()
         self.photo_folder.setReadOnly(True)
         self.calibration_photo = QLineEdit()
@@ -142,7 +147,7 @@ class MainWindow(QMainWindow):
         self.offset_seconds.setRange(-7 * 24 * 3600, 7 * 24 * 3600)
         self.offset_seconds.setSuffix(" s")
         self.offset_label = QLabel("+00:00:00")
-        self.status_label = QLabel("Choose a GPX track and photo folder to begin.")
+        self.status_label = QLabel("Choose GPX files and a photo folder to begin.")
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
@@ -166,12 +171,17 @@ class MainWindow(QMainWindow):
 
         inputs = QGroupBox("Inputs")
         input_layout = QGridLayout(inputs)
-        input_layout.addWidget(QLabel("GPX track"), 0, 0)
-        input_layout.addWidget(self.gpx_path, 0, 1)
-        input_layout.addWidget(self._button("Choose", self.choose_gpx), 0, 2)
+        input_layout.addWidget(QLabel("GPX files"), 0, 0, Qt.AlignTop)
+        input_layout.addWidget(self.gpx_list, 0, 1)
+        gpx_buttons = QVBoxLayout()
+        gpx_buttons.addWidget(self._button("Add", self.choose_gpx))
+        gpx_buttons.addWidget(self._button("Remove", self.remove_selected_gpx))
+        gpx_buttons.addStretch()
+        input_layout.addLayout(gpx_buttons, 0, 2)
         input_layout.addWidget(QLabel("Photo folder"), 1, 0)
         input_layout.addWidget(self.photo_folder, 1, 1)
         input_layout.addWidget(self._button("Choose", self.choose_folder), 1, 2)
+        input_layout.setRowStretch(0, 1)
 
         calibration = QGroupBox("Clock Calibration")
         calibration_layout = QGridLayout(calibration)
@@ -212,17 +222,43 @@ class MainWindow(QMainWindow):
         return button
 
     def choose_gpx(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(self, "Choose GPX track", "", "GPX files (*.gpx *.GPX)")
-        if not filename:
+        filenames, _ = QFileDialog.getOpenFileNames(self, "Choose GPX files", "", "GPX files (*.gpx *.GPX)")
+        if not filenames:
             return
-        self.gpx_path.setText(filename)
-        try:
-            self.gpx_points = parse_gpx(Path(filename))
-        except Exception as exc:
-            self.gpx_points = []
-            self._error("Could not read GPX track", str(exc))
+
+        loaded = 0
+        skipped = 0
+        failures: list[str] = []
+        for filename in filenames:
+            path = Path(filename)
+            if path in self.gpx_files:
+                skipped += 1
+                continue
+            try:
+                self.gpx_files[path] = parse_gpx(path)
+            except Exception as exc:
+                failures.append(f"{path.name}: {exc}")
+                continue
+            loaded += 1
+
+        self._refresh_gpx_list()
+        if failures:
+            self._error("Some GPX files could not be read", "\n".join(failures[:10]))
             return
-        self.status_label.setText(f"Loaded {len(self.gpx_points)} GPX points.")
+
+        self.status_label.setText(self._gpx_status_text(loaded=loaded, skipped=skipped))
+
+    def remove_selected_gpx(self) -> None:
+        selected = self.gpx_list.selectedItems()
+        if not selected:
+            self.status_label.setText("Select one or more GPX files to remove.")
+            return
+
+        for item in selected:
+            self.gpx_files.pop(Path(item.data(Qt.UserRole)), None)
+
+        self._refresh_gpx_list()
+        self.status_label.setText(self._gpx_status_text(removed=len(selected)))
 
     def choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose photo folder")
@@ -281,7 +317,7 @@ class MainWindow(QMainWindow):
 
     def preview_matches(self) -> None:
         if not self.gpx_points:
-            self._error("GPX track missing", "Choose a GPX track with timestamped track points.")
+            self._error("GPX files missing", "Add one or more GPX files with timestamped track points.")
             return
         if not self.photo_folder.text():
             self._error("Photo folder missing", "Choose a folder containing JPEG photos.")
@@ -304,7 +340,7 @@ class MainWindow(QMainWindow):
     def write_tags(self) -> None:
         ready = [match for match in self.matches if match.point is not None]
         if not ready:
-            self._error("Nothing to write", "Preview matches first; at least one photo must match the GPX track.")
+            self._error("Nothing to write", "Preview matches first; at least one photo must match the loaded GPX files.")
             return
 
         reply = QMessageBox.question(
@@ -331,6 +367,40 @@ class MainWindow(QMainWindow):
 
     def _offset_changed(self) -> None:
         self.offset_label.setText(format_offset(self.offset_seconds.value()))
+
+    def _refresh_gpx_list(self) -> None:
+        self.matches = []
+        self.table.setRowCount(0)
+
+        self.gpx_points = [
+            point
+            for path in sorted(self.gpx_files)
+            for point in self.gpx_files[path]
+        ]
+        self.gpx_points.sort(key=lambda point: point.time)
+
+        self.gpx_list.clear()
+        for path, points in sorted(self.gpx_files.items()):
+            item = QListWidgetItem(f"{path.name} ({len(points)} points)")
+            item.setData(Qt.UserRole, str(path))
+            item.setToolTip(str(path))
+            self.gpx_list.addItem(item)
+
+    def _gpx_status_text(self, *, loaded: int = 0, skipped: int = 0, removed: int = 0) -> str:
+        parts: list[str] = []
+        if loaded:
+            parts.append(f"loaded {loaded}")
+        if skipped:
+            parts.append(f"skipped {skipped} duplicate")
+        if removed:
+            parts.append(f"removed {removed}")
+
+        action = ", ".join(parts)
+        total_files = len(self.gpx_files)
+        total_points = len(self.gpx_points)
+        if action:
+            return f"GPX files {action}. {total_files} loaded with {total_points} total points."
+        return f"{total_files} GPX files loaded with {total_points} total points."
 
     def _default_timezone_text(self) -> str:
         offset = datetime.now().astimezone().utcoffset()
