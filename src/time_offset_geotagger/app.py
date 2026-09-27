@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QTime, Qt
+from PySide6.QtCore import QDate, QSettings, QTime, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -38,6 +38,10 @@ from PySide6.QtWidgets import (
 from .exif import Photo, clear_gps_tags, discover_photos, load_photo, read_taken_at, write_gps_tags
 from .gpx import TrackPoint, interpolate, parse_gpx
 from .timeutil import format_offset, parse_actual_date_time
+
+
+OFFSET_SETTING = "calibration/offset_seconds"
+MAX_GPX_GAP_SETTING = "matching/max_gpx_gap_seconds"
 
 
 @dataclass(frozen=True)
@@ -125,6 +129,7 @@ class MainWindow(QMainWindow):
         self.gpx_points: list[TrackPoint] = []
         self.gpx_files: dict[Path, list[TrackPoint]] = {}
         self.matches: list[Match] = []
+        self.settings = QSettings()
 
         self.gpx_list = QListWidget()
         self.gpx_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -150,6 +155,7 @@ class MainWindow(QMainWindow):
         self.max_gpx_gap_seconds = QSpinBox()
         self.max_gpx_gap_seconds.setRange(1, 24 * 3600)
         self.max_gpx_gap_seconds.setValue(300)
+        self._restore_settings()
         self.max_gpx_gap_seconds.setSuffix(" s")
         self.status_label = QLabel("Choose GPX files and a photo folder to begin.")
 
@@ -166,6 +172,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self.offset_seconds.valueChanged.connect(self._offset_changed)
         self.max_gpx_gap_seconds.valueChanged.connect(self._clear_matches)
+        self.max_gpx_gap_seconds.valueChanged.connect(self._max_gpx_gap_changed)
         self._offset_changed()
 
     def _build_ui(self) -> None:
@@ -407,6 +414,20 @@ class MainWindow(QMainWindow):
 
     def _offset_changed(self) -> None:
         self.offset_label.setText(format_offset(self.offset_seconds.value()))
+        self.settings.setValue(OFFSET_SETTING, self.offset_seconds.value())
+
+    def _max_gpx_gap_changed(self) -> None:
+        self.settings.setValue(MAX_GPX_GAP_SETTING, self.max_gpx_gap_seconds.value())
+
+    def _restore_settings(self) -> None:
+        self.offset_seconds.setValue(self._int_setting(OFFSET_SETTING, self.offset_seconds.value()))
+        self.max_gpx_gap_seconds.setValue(self._int_setting(MAX_GPX_GAP_SETTING, self.max_gpx_gap_seconds.value()))
+
+    def _int_setting(self, key: str, default: int) -> int:
+        try:
+            return int(self.settings.value(key, default))
+        except (TypeError, ValueError):
+            return default
 
     def _clear_matches(self) -> None:
         self.matches = []
@@ -481,6 +502,8 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
+    app.setOrganizationName("TimeOffsetGeotagger")
+    app.setApplicationName("Time Offset Geotagger")
     window = MainWindow()
     window.show()
     return app.exec()
